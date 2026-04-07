@@ -1,0 +1,28 @@
+{
+  "name": "healthcare-ai-assistant",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "imessage": "npx tsx src/imessage.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "description": "AI-powered healthcare navigation assistant via iMessage",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@photon-ai/advanced-imessage-kit": "^1.14.3",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.9",
+    "typescript": "^5.9.3"
+  }
+}
