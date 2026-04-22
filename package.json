@@ -4,7 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "imessage": "npx tsx src/imessage.ts"
+    "imessage": "npx tsx src/imessage.ts",
+    "web": "npx tsx src/web/server.ts"
   },
   "keywords": [],
   "author": "",
@@ -17,11 +18,17 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@photon-ai/advanced-imessage-kit": "^1.14.3",
+    "@supabase/supabase-js": "^2.104.0",
     "better-sqlite3": "^12.8.0",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
     "@types/node": "^24.10.9",
     "typescript": "^5.9.3"
   }
