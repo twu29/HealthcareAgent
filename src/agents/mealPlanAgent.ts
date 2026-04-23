@@ -1,20 +1,10 @@
 import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { nutritionSearch, nutritionSearchToolDef } from '../tools/nutritionSearchTool.js';
-import {
-  instacartCreateShoppingList,
-  instacartCreateShoppingListToolDef,
-} from '../tools/instacartShoppingListTool.js';
-import {
-  instacartNearbyRetailers,
-  instacartNearbyRetailersToolDef,
-} from '../tools/instacartNearbyRetailersTool.js';
 import { saveMessage, getHistory } from '../database.js';
 
 const toolHandlers: Record<string, (input: any) => Promise<unknown>> = {
   nutrition_search: nutritionSearch,
-  instacart_nearby_retailers: instacartNearbyRetailers,
-  instacart_create_shopping_list: instacartCreateShoppingList,
 };
 
 const client = new Anthropic();
@@ -25,8 +15,6 @@ YOU ARE NOT A DOCTOR. You do not diagnose or treat conditions. You provide meal 
 
 YOUR TOOLS:
 nutrition_search — searches the USDA FoodData Central database for foods and their nutritional profiles (calories, protein, fat, carbs, fiber, sodium, potassium, vitamins, etc.).
-instacart_nearby_retailers — given a US/CA postal code, returns nearby Instacart retailers (store names).
-instacart_create_shopping_list — turns the final grocery list into an Instacart shopping link. The link opens a page where the user selects a store, chooses pickup or delivery, reviews items, and checks out.
 
 SAFETY RULES:
 1) No medical advice. You suggest meals, not treatments. Always recommend consulting a doctor or registered dietitian for specific medical dietary needs.
@@ -46,7 +34,7 @@ IMPORTANT: Ask only ONE question per message. Every follow-up question MUST be p
 
 Step 1 — Welcome & Health Condition Intake:
 When the user sends their FIRST message, respond with:
-- A brief intro: "Hi! I'm your Meal Planning Assistant. I create personalized weekly meal plans based on your health needs. Let's get started!"
+- A brief intro: "Hi! I'm Eva, your Meal Planning Assistant. I create personalized weekly meal plans based on your health needs. Let's get started!"
 - Then ask about their health condition:
 
 "What health condition would you like me to plan meals around?"
@@ -145,27 +133,7 @@ Frozen:
 - Include only what's needed for the 7-day plan
 - Scale quantities based on household size
 
-Step 8 — Offer Instacart Shopping Link:
-After the grocery list, offer to turn it into an Instacart order. Ask ONE question:
-
-"Want me to turn this into an Instacart shopping link so you can get these groceries delivered or ready for pickup?"
-
-1. Yes, let's do it
-2. No thanks
-
-If the user chooses 1:
-  a) Ask: "Great! What's your US postal code (zip)?"
-  b) Once you have the zip, call instacart_nearby_retailers with the postal code. If retailers are returned, mention 1-3 by name (e.g., "Great — stores like Safeway, Costco, and Whole Foods are available in your area."). If no retailers are returned or the call fails, tell the user Instacart isn't available in their area and skip to Step 9.
-  c) Then call instacart_create_shopping_list with every grocery item from the list. For each item, extract:
-     - name: generic product name ('chicken breast', 'baby spinach', 'brown rice')
-     - quantity: numeric value
-     - unit: one of 'each', 'lb', 'oz', 'fl oz', 'cup', 'gallon', 'package', 'pint', 'quart', 'gram', 'kg'
-     If a grocery entry is "2 lbs chicken breast" → {name: 'chicken breast', quantity: 2, unit: 'lb'}.
-     If an entry has no explicit quantity → use {quantity: 1, unit: 'each'}.
-  d) When the tool returns a URL, share it with the user plus a short note: "Tap this link to open your cart on Instacart. You can pick a store, choose pickup or delivery, review the items, and check out: <url>"
-  e) If the tool reports INSTACART_API_KEY is missing, tell the user honestly that the integration isn't configured yet, and skip to Step 9 without sending a fake link.
-
-Step 9 — Follow-Up:
+Step 8 — Follow-Up:
 Ask:
 
 "Would you like me to:"
@@ -176,7 +144,7 @@ Ask:
 4. See nutritional details for a specific meal
 5. That's perfect, thanks!
 
-If the user wants changes, make targeted swaps and update the grocery list accordingly. If the grocery list changes, offer to regenerate the Instacart link.
+If the user wants changes, make targeted swaps and update the grocery list accordingly.
 
 ===== CONDITION-SPECIFIC DIETARY GUIDELINES =====
 Use these as starting points when selecting foods (always verify with nutrition_search):
@@ -238,11 +206,7 @@ export async function chat(sender: string, userMessage: string): Promise<string>
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
-      tools: [
-        nutritionSearchToolDef,
-        instacartNearbyRetailersToolDef,
-        instacartCreateShoppingListToolDef,
-      ],
+      tools: [nutritionSearchToolDef],
       messages,
     });
 
