@@ -90,7 +90,7 @@ async function main() {
             await sdk.messages.sendMessage({
               chatGuid,
               message:
-                "I don’t have extracted prescription text ready yet. Please upload the document again.",
+                "I don't have extracted prescription text ready yet. Please upload the document again.",
             });
             return;
           }
@@ -115,7 +115,7 @@ async function main() {
           await sdk.messages.sendMessage({
             chatGuid,
             message:
-              "Got it — weekly meal plan generator is the next step. I’ll use the prescription context to guide food-related planning.",
+              "Got it — weekly meal plan generator is the next step. I'll use the prescription context to guide food-related planning.",
           });
 
           setState(sender, {
@@ -341,7 +341,7 @@ function buildReminderActivationMessage(schedule: DailyScheduleItem[]): string {
   const lines: string[] = [];
   lines.push("Your medicine reminders are now active.");
   lines.push("");
-  lines.push("At each scheduled time, I’ll send you a reminder telling you exactly what to take:");
+  lines.push("At each scheduled time, I'll send you a reminder telling you exactly what to take:");
   lines.push("");
 
   for (const item of schedule) {
