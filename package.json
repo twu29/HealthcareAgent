@@ -18,10 +18,12 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@photon-ai/advanced-imessage-kit": "^1.14.3",
     "@supabase/supabase-js": "^2.104.0",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "pdfkit": "^0.18.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.9",
+    "@types/pdfkit": "^0.17.6",
     "typescript": "^5.9.3"
   }
 }

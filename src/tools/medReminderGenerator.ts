@@ -24,6 +24,35 @@ export type ReminderTime = {
     dosageText: string | null;
     mealTiming: string | null;
   };
+
+  export type RawMedicationExtraction = {
+    medicationName: string;
+    quantityText: string | null;
+    dosageText: string | null;
+    frequencyText: string | null;
+    durationText: string | null;
+    mealTiming: string | null;
+    timingNotes: string[];
+  };
+
+  export function buildDraftFromExtraction(
+    raw: RawMedicationExtraction
+  ): MedicationPlanDraft {
+    const timesPerDay = extractTimesPerDay(raw.frequencyText);
+    const suggestedTimes = suggestTimes(raw.frequencyText, raw.mealTiming);
+    return {
+      medicationName: raw.medicationName,
+      quantityText: raw.quantityText,
+      dosageText: raw.dosageText,
+      frequencyText: raw.frequencyText,
+      timesPerDay,
+      durationText: raw.durationText,
+      mealTiming: raw.mealTiming,
+      timingNotes: raw.timingNotes,
+      suggestedTimes,
+      confidence: computeConfidence(raw.medicationName, raw.frequencyText, suggestedTimes),
+    };
+  }
   
   function normalizeWhitespace(text: string): string {
     return text.replace(/\r/g, "").replace(/\t/g, " ").replace(/[ ]{2,}/g, " ").trim();

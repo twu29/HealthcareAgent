@@ -11,14 +11,18 @@ import {
   buildDailySchedule,
   formatDailySchedule,
   type DailyScheduleItem,
+  type MedicationPlanDraft,
 } from "./tools/medReminderGenerator.js";
+import { extractMedicationsFromText } from "./tools/medicationTextExtractor.js";
 import { createMedicationReminderSchedule } from "./tools/reminderScheduler.js";
 
 type ConversationStep =
   | "idle"
   | "awaiting_onboarding_choice"
+  | "awaiting_input_method"
   | "awaiting_meds_document"
   | "awaiting_combo_document"
+  | "awaiting_typed_meds"
   | "awaiting_med_confirmation"
   | "meal_plan_conversation";
 
@@ -29,6 +33,7 @@ type ConversationState = {
   extractedText: string | null;
   preDiagnosisResult: string | null;
   flow: ConversationFlow;
+  medicationDrafts: MedicationPlanDraft[] | null;
 };
 
 const conversationState = new Map<string, ConversationState>();
@@ -39,6 +44,7 @@ function getState(sender: string): ConversationState {
     extractedText: null,
     preDiagnosisResult: null,
     flow: null,
+    medicationDrafts: null,
   };
 }
 
@@ -47,7 +53,7 @@ function setState(sender: string, state: ConversationState) {
 }
 
 const INTRO_MESSAGE =
-  "Hi! I'm Eva, your personal health assistant. I can set up medicine reminders from your documents and build meal plans around your health.";
+  "Hi! I'm Ava, your personal health assistant. I can set up medicine reminders from your documents and build meal plans around your health.";
 
 const MENU_MESSAGE =
   "What would you like help with?\n\n" +
@@ -58,6 +64,16 @@ const MENU_MESSAGE =
 
 const UPLOAD_PROMPT_MESSAGE =
   "Please upload your report, lab result, doctor notes, or medicine list as an image or PDF.";
+
+const INPUT_METHOD_PROMPT =
+  "How would you like to share your medications?\n\n" +
+  "1. Upload a document (image or PDF)\n" +
+  "2. Type them out\n\n" +
+  "Reply 1 or 2.";
+
+const TYPED_MEDS_PROMPT =
+  "Got it. Please type your medications and supplements, including the dose, how often you take them, and any timing notes (with food, before bed, etc.).\n\n" +
+  'Example: "Lisinopril 10mg once daily in the morning. Vitamin D 1000 IU with breakfast. Metformin 500mg twice daily with food."';
 
 async function main() {
   const sdk = SDK({
@@ -98,6 +114,7 @@ async function main() {
           extractedText: null,
           preDiagnosisResult: null,
           flow: null,
+          medicationDrafts: null,
         });
         return;
       }
@@ -106,8 +123,8 @@ async function main() {
         const choice = userText.trim();
 
         if (choice === "1") {
-          await sdk.messages.sendMessage({ chatGuid, message: UPLOAD_PROMPT_MESSAGE });
-          setState(sender, { ...state, step: "awaiting_meds_document", flow: "meds_only" });
+          await sdk.messages.sendMessage({ chatGuid, message: INPUT_METHOD_PROMPT });
+          setState(sender, { ...state, step: "awaiting_input_method", flow: "meds_only" });
           return;
         }
 
@@ -122,14 +139,38 @@ async function main() {
         }
 
         if (choice === "3") {
-          await sdk.messages.sendMessage({ chatGuid, message: UPLOAD_PROMPT_MESSAGE });
-          setState(sender, { ...state, step: "awaiting_combo_document", flow: "combo" });
+          await sdk.messages.sendMessage({ chatGuid, message: INPUT_METHOD_PROMPT });
+          setState(sender, { ...state, step: "awaiting_input_method", flow: "combo" });
           return;
         }
 
         await sdk.messages.sendMessage({
           chatGuid,
           message: "Please reply 1, 2, or 3.",
+        });
+        return;
+      }
+
+      if (state.step === "awaiting_input_method") {
+        const choice = userText.trim();
+
+        if (choice === "1") {
+          await sdk.messages.sendMessage({ chatGuid, message: UPLOAD_PROMPT_MESSAGE });
+          const nextStep =
+            state.flow === "combo" ? "awaiting_combo_document" : "awaiting_meds_document";
+          setState(sender, { ...state, step: nextStep });
+          return;
+        }
+
+        if (choice === "2") {
+          await sdk.messages.sendMessage({ chatGuid, message: TYPED_MEDS_PROMPT });
+          setState(sender, { ...state, step: "awaiting_typed_meds" });
+          return;
+        }
+
+        await sdk.messages.sendMessage({
+          chatGuid,
+          message: "Please reply 1 or 2.",
         });
         return;
       }
@@ -143,7 +184,9 @@ async function main() {
           return;
         }
 
-        const extractedText = await processAttachments(sdk, sender, attachments);
+        const extractedText = await withTyping(sdk, chatGuid, () =>
+          processAttachments(sdk, sender, attachments)
+        );
         if (!extractedText.trim()) {
           await sdk.messages.sendMessage({
             chatGuid,
@@ -162,6 +205,7 @@ async function main() {
           ...state,
           step: "awaiting_med_confirmation",
           extractedText,
+          medicationDrafts: drafts,
         });
         return;
       }
@@ -176,7 +220,9 @@ async function main() {
           return;
         }
 
-        const extractedText = await processAttachments(sdk, sender, attachments);
+        const extractedText = await withTyping(sdk, chatGuid, () =>
+          processAttachments(sdk, sender, attachments)
+        );
         if (!extractedText.trim()) {
           await sdk.messages.sendMessage({
             chatGuid,
@@ -185,7 +231,9 @@ async function main() {
           return;
         }
 
-        const diagnosisReply = await preDiagnosisChat(sender, extractedText);
+        const diagnosisReply = await withTyping(sdk, chatGuid, () =>
+          preDiagnosisChat(sender, extractedText)
+        );
         const cleanDiagnosis = stripMarkdown(diagnosisReply);
         await sdk.messages.sendMessage({ chatGuid, message: cleanDiagnosis });
 
@@ -200,6 +248,54 @@ async function main() {
           step: "awaiting_med_confirmation",
           extractedText,
           preDiagnosisResult: cleanDiagnosis,
+          medicationDrafts: drafts,
+        });
+        return;
+      }
+
+      if (state.step === "awaiting_typed_meds") {
+        if (!userText.trim()) {
+          await sdk.messages.sendMessage({
+            chatGuid,
+            message:
+              "Please type your medications and supplements so I can build a reminder schedule.",
+          });
+          return;
+        }
+
+        const drafts = await withTyping(sdk, chatGuid, () =>
+          extractMedicationsFromText(userText)
+        );
+
+        if (!drafts.length) {
+          await sdk.messages.sendMessage({
+            chatGuid,
+            message:
+              "I couldn't pull a clear medication list from that. Try listing each one on its own line with the dose and how often you take it (e.g. \"Lisinopril 10mg once daily\").",
+          });
+          return;
+        }
+
+        let preDiagnosisResult: string | null = null;
+        if (state.flow === "combo") {
+          const diagnosisReply = await withTyping(sdk, chatGuid, () =>
+            preDiagnosisChat(sender, userText)
+          );
+          preDiagnosisResult = stripMarkdown(diagnosisReply);
+          await sdk.messages.sendMessage({ chatGuid, message: preDiagnosisResult });
+        }
+
+        await sdk.messages.sendMessage({
+          chatGuid,
+          message: formatMedicationPlanForConfirmation(drafts),
+        });
+
+        setState(sender, {
+          ...state,
+          step: "awaiting_med_confirmation",
+          extractedText: userText,
+          preDiagnosisResult,
+          medicationDrafts: drafts,
         });
         return;
       }
@@ -214,22 +310,23 @@ async function main() {
           return;
         }
 
-        if (!state.extractedText) {
+        const drafts = state.medicationDrafts;
+        if (!drafts || !drafts.length) {
           await sdk.messages.sendMessage({
             chatGuid,
             message:
-              "I don't have the prescription text anymore. Please upload the document again.",
+              "I don't have a confirmed medication list anymore. Please start again.",
           });
           setState(sender, {
             step: "idle",
             extractedText: null,
             preDiagnosisResult: null,
             flow: null,
+            medicationDrafts: null,
           });
           return;
         }
 
-        const drafts = buildMedicationPlanDrafts(state.extractedText);
         const schedule = buildDailySchedule(drafts);
 
         if (!schedule.length) {
@@ -254,11 +351,10 @@ async function main() {
             state.preDiagnosisResult,
             state.extractedText
           );
-          const mealReply = await mealPlanChat(sender, mealPrompt);
-          await sdk.messages.sendMessage({
-            chatGuid,
-            message: stripMarkdown(mealReply),
-          });
+          const mealReply = await withTyping(sdk, chatGuid, () =>
+            mealPlanChat(sender, mealPrompt)
+          );
+          await sendMealPlanReply(sdk, chatGuid, mealReply);
 
           setState(sender, { ...state, step: "meal_plan_conversation" });
           return;
@@ -269,6 +365,7 @@ async function main() {
           extractedText: null,
           preDiagnosisResult: null,
           flow: null,
+          medicationDrafts: null,
         });
         return;
       }
@@ -277,7 +374,9 @@ async function main() {
         let messageForAgent = userText;
 
         if (attachments.length > 0) {
-          const extracted = await processAttachments(sdk, sender, attachments);
+          const extracted = await withTyping(sdk, chatGuid, () =>
+            processAttachments(sdk, sender, attachments)
+          );
           messageForAgent = [userText, extracted].filter(Boolean).join("\n\n");
         }
 
@@ -289,11 +388,10 @@ async function main() {
           return;
         }
 
-        const reply = await mealPlanChat(sender, messageForAgent);
-        await sdk.messages.sendMessage({
-          chatGuid,
-          message: stripMarkdown(reply),
-        });
+        const reply = await withTyping(sdk, chatGuid, () =>
+          mealPlanChat(sender, messageForAgent)
+        );
+        await sendMealPlanReply(sdk, chatGuid, reply);
         return;
       }
     } catch (err) {
@@ -347,6 +445,50 @@ async function processAttachments(
   }
 
   return sections.join("\n\n");
+}
+
+async function withTyping<T>(
+  sdk: any,
+  chatGuid: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const ping = () => sdk.chats.startTyping(chatGuid).catch(() => {});
+  await ping();
+  const interval = setInterval(ping, 8000);
+  try {
+    return await fn();
+  } finally {
+    clearInterval(interval);
+    await sdk.chats.stopTyping(chatGuid).catch(() => {});
+  }
+}
+
+async function sendMealPlanReply(
+  sdk: any,
+  chatGuid: string,
+  reply: { text: string; pdfPath?: string; pdfFileName?: string }
+): Promise<void> {
+  const text = stripMarkdown(reply.text);
+  if (text) {
+    await sdk.messages.sendMessage({ chatGuid, message: text });
+  }
+
+  if (reply.pdfPath) {
+    try {
+      await sdk.attachments.sendAttachment({
+        chatGuid,
+        filePath: reply.pdfPath,
+        fileName: reply.pdfFileName ?? "meal-plan.pdf",
+      });
+    } catch (err) {
+      console.error("Failed to send meal plan PDF:", err);
+      await sdk.messages.sendMessage({
+        chatGuid,
+        message:
+          "I generated your meal plan PDF but couldn't attach it. Please try again.",
+      });
+    }
+  }
 }
 
 function stripMarkdown(value: string): string {

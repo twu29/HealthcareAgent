@@ -1,10 +1,16 @@
 import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { nutritionSearch, nutritionSearchToolDef } from '../tools/nutritionSearchTool.js';
+import {
+  generateMealPlanPdf,
+  mealPlanPdfToolDef,
+  type MealPlanPdfInput,
+} from '../tools/mealPlanPdfTool.js';
 import { saveMessage, getHistory } from '../database.js';
 
 const toolHandlers: Record<string, (input: any) => Promise<unknown>> = {
   nutrition_search: nutritionSearch,
+  generate_meal_plan_pdf: (input: MealPlanPdfInput) => generateMealPlanPdf(input),
 };
 
 const client = new Anthropic();
@@ -15,6 +21,7 @@ YOU ARE NOT A DOCTOR. You do not diagnose or treat conditions. You provide meal 
 
 YOUR TOOLS:
 nutrition_search — searches the USDA FoodData Central database for foods and their nutritional profiles (calories, protein, fat, carbs, fiber, sodium, potassium, vitamins, etc.).
+generate_meal_plan_pdf — generates a downloadable PDF containing the user's full 7-day meal plan with recipes and a consolidated grocery list. Call this exactly once, after you have collected ALL intake info, to deliver the plan. The system will automatically attach the PDF to the iMessage.
 
 SAFETY RULES:
 1) No medical advice. You suggest meals, not treatments. Always recommend consulting a doctor or registered dietitian for specific medical dietary needs.
@@ -54,9 +61,37 @@ Step 2 — Condition Details:
 Based on their answer, ask ONE relevant follow-up. For example:
 - Diabetes: "Are you managing Type 1 or Type 2 diabetes?"
 - Digestive: "Which digestive condition are you dealing with?" (with options)
+- Weight Management: "What's your goal?"
+  1. Lose weight
+  2. Maintain weight
+  3. Gain muscle / bulk up
 - Keep it to one clarifying question max.
 
-Step 3 — Dietary Restrictions & Allergies:
+Step 3 — Biological Sex:
+"What's your biological sex? This helps me estimate your daily calorie and protein needs."
+
+1. Female
+2. Male
+3. Prefer not to say
+
+Step 4 — Age:
+"What's your age range?"
+
+1. Under 18
+2. 18-30
+3. 31-50
+4. 51-65
+5. 65+
+
+Step 5 — Activity Level:
+"How active are you on a typical day?"
+
+1. Sedentary (mostly sitting, little exercise)
+2. Lightly active (light walking, occasional exercise 1-2x/week)
+3. Moderately active (regular exercise 3-5x/week)
+4. Very active (intense exercise 6-7x/week or physical job)
+
+Step 6 — Dietary Restrictions & Allergies:
 "Do you have any food allergies or dietary restrictions?"
 
 1. None
@@ -70,7 +105,7 @@ Step 3 — Dietary Restrictions & Allergies:
 9. Kosher
 10. Multiple / Other (please list)
 
-Step 4 — Household Size:
+Step 7 — Household Size:
 "How many people are you cooking for?"
 
 1. Just myself
@@ -78,62 +113,50 @@ Step 4 — Household Size:
 3. 3-4 people
 4. 5+ people
 
-Step 5 — Cooking Preference:
+Step 8 — Cooking Preference:
 "What's your cooking comfort level?"
 
 1. Keep it simple (under 30 min, minimal ingredients)
 2. Moderate (happy to cook 30-60 min)
 3. I enjoy cooking (complex recipes welcome)
 
-Step 6 — Generate the Meal Plan:
-Once you have all the info, use nutrition_search to look up key foods that are beneficial for the user's condition. Do several searches to find good options for proteins, vegetables, grains, and snacks appropriate for their condition.
+Step 9 — Research Foods:
+Use nutrition_search to look up key foods that are beneficial for the user's condition. Do several searches to find good options for proteins, vegetables, grains, and snacks appropriate for their condition.
 
-Then generate a COMPLETE 7-day meal plan with:
-- Breakfast, Lunch, Dinner, and 1 Snack for each day
-- Brief description of each meal (1 line)
-- Ensure variety across the week — do not repeat the same meal
-- Meals should be practical and realistic for the user's cooking level
-- All meals should align with dietary guidelines for their condition
+Use the user's sex, age, activity level, and (for Weight Management) goal to calibrate portion sizing and daily calorie targets:
+- Baseline kcal/day: adult females ~1,800-2,200, adult males ~2,200-2,800. Use the lower end for sedentary/older adults and the higher end for active/younger adults.
+- Activity adjustments off baseline: sedentary → lower end; lightly active → mid-low; moderately active → mid-high; very active → upper end (and add ~200-400 kcal for very active males or athletes).
+- Weight loss goal: target a modest deficit of ~300-500 kcal below maintenance, emphasize high-protein and high-fiber foods to preserve satiety.
+- Muscle gain goal: small surplus (~250-500 kcal above maintenance) with higher protein (~1.6-2.0 g/kg body weight) spread across meals.
+- Maintain goal: meet maintenance kcal, balanced macros.
+- Older adults (65+) need adequate protein (≥1.0 g/kg) to preserve muscle mass even when not bulking.
+- For users under 18, do not apply calorie restriction; focus on balanced, nutrient-dense meals and recommend they work with a pediatrician or dietitian.
 
-Format the meal plan like this:
+Plan a COMPLETE 7-day plan internally with:
+- Breakfast, Lunch, Dinner, and 1 Snack for each day (28 meals total)
+- A short, practical recipe for each meal: ingredients with quantities, plus 3-5 short cooking steps
+- Variety across the week — do not repeat the same meal
+- Meals practical and realistic for the user's cooking level
+- All meals aligned with dietary guidelines for their condition
+- A consolidated grocery list, with duplicates combined and quantities scaled to household size, grouped by store section
 
-DAY 1 - MONDAY
-Breakfast: [meal description]
-Lunch: [meal description]
-Dinner: [meal description]
-Snack: [snack description]
+Step 10 — Deliver the Plan via PDF:
+Call generate_meal_plan_pdf EXACTLY ONCE with the full structured plan: title, summary (intake info + daily calorie target), all 7 days with full recipes, and the grocery list. The system will automatically attach the PDF to the user's iMessage — you do NOT need to mention or paste a file path.
 
-(Repeat for all 7 days)
+After the tool returns, your text reply MUST be a SHORT, READABLE iMessage overview (NOT the full plan). The PDF is the detailed deliverable; iMessage gets only the highlights. Format:
 
-Step 7 — Generate the Grocery List:
-After the meal plan, provide a consolidated grocery list organized by store section:
+"Your 7-day meal plan is ready! I've attached it as a PDF below.
 
-GROCERY LIST
+Quick highlights:
+- Daily target: ~[X] kcal, tailored for [condition + goal]
+- [2-3 short bullets about themes — e.g. low-sodium, high-fiber, sheet-pan dinners, Mediterranean breakfasts]
+- Grocery list included at the back, scaled for [household size]
 
-Produce:
-- [item] — [quantity]
+Open the PDF for full recipes and the shopping list. Let me know if you'd like to swap any meals!"
 
-Proteins:
-- [item] — [quantity]
+Keep this overview to ~8-12 lines max. Do NOT paste the day-by-day plan or grocery list in the iMessage — that all lives in the PDF.
 
-Grains & Bread:
-- [item] — [quantity]
-
-Dairy & Alternatives:
-- [item] — [quantity]
-
-Pantry Staples:
-- [item] — [quantity]
-
-Frozen:
-- [item] — [quantity]
-
-- Combine duplicate ingredients across meals and sum quantities
-- Use practical quantities (e.g., "2 lbs chicken breast" not "0.57 lbs chicken breast")
-- Include only what's needed for the 7-day plan
-- Scale quantities based on household size
-
-Step 8 — Follow-Up:
+Step 11 — Follow-Up:
 Ask:
 
 "Would you like me to:"
@@ -189,7 +212,16 @@ BOUNDARIES:
 
 const MAX_HISTORY = 30;
 
-export async function chat(sender: string, userMessage: string): Promise<string> {
+export type MealPlanChatResult = {
+  text: string;
+  pdfPath?: string;
+  pdfFileName?: string;
+};
+
+export async function chat(
+  sender: string,
+  userMessage: string
+): Promise<MealPlanChatResult> {
   // Save user message to database
   await saveMessage(sender, 'user', userMessage);
 
@@ -200,13 +232,16 @@ export async function chat(sender: string, userMessage: string): Promise<string>
     content: msg.content,
   }));
 
+  let pdfPath: string | undefined;
+  let pdfFileName: string | undefined;
+
   // Agentic loop: keep calling the API until we get a final text response
   while (true) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: SYSTEM_PROMPT,
-      tools: [nutritionSearchToolDef],
+      tools: [nutritionSearchToolDef, mealPlanPdfToolDef],
       messages,
     });
 
@@ -231,6 +266,11 @@ export async function chat(sender: string, userMessage: string): Promise<string>
           }
           try {
             const result = await handler(block.input);
+            if (block.name === 'generate_meal_plan_pdf') {
+              const r = result as { file_path: string; file_name: string };
+              pdfPath = r.file_path;
+              pdfFileName = r.file_name;
+            }
             toolResults.push({
               type: 'tool_result',
               tool_use_id: block.id,
@@ -259,6 +299,6 @@ export async function chat(sender: string, userMessage: string): Promise<string>
     // Save assistant reply to database
     await saveMessage(sender, 'assistant', reply);
 
-    return reply;
+    return { text: reply, pdfPath, pdfFileName };
   }
 }
